@@ -184,13 +184,14 @@ const pct=(sorted,q)=>{const i=(sorted.length-1)*q/100,lo=Math.floor(i),hi=Math.
 function analyze(data,wbStrength=0.6){
   const dec=new Float64Array(256);for(let i=0;i<256;i++)dec[i]=decode(i/255);
   const N=data.length/4,ys=new Float32Array(N);
-  let hi=0,lo=0,midN=0,sl=[0,0,0],chromaSum=0,meanSum=0;
+  let hi=0,lo=0,midN=0,sl=[0,0,0],chromaSum=0,meanSum=0;const chr=[];
   for(let i=0,k=0;i<data.length;i+=4,k++){
     const a=dec[data[i]],b=dec[data[i+1]],c=dec[data[i+2]];
     const r=M[0][0]*a+M[0][1]*b+M[0][2]*c,g=M[1][0]*a+M[1][1]*b+M[1][2]*c,bl=M[2][0]*a+M[2][1]*b+M[2][2]*c;
     const y=LUMA[0]*r+LUMA[1]*g+LUMA[2]*bl;ys[k]=y;
     const mx=Math.max(data[i],data[i+1],data[i+2]);if(mx/255>0.98)hi++;if(mx/255<0.02)lo++;
     if(y>0.03&&y<0.5){midN++;sl[0]+=Math.log(Math.max(r,1e-4));sl[1]+=Math.log(Math.max(g,1e-4));sl[2]+=Math.log(Math.max(bl,1e-4));
+      chr.push(Math.log2(Math.max(r,1e-4))-Math.log2(Math.max(g,1e-4)),Math.log2(Math.max(bl,1e-4))-Math.log2(Math.max(g,1e-4)));
       const m=(r+g+bl)/3;chromaSum+=(Math.abs(r-m)+Math.abs(g-m)+Math.abs(bl-m))/3;meanSum+=m}
   }
   const sorted=Float32Array.from(ys).sort();
@@ -198,6 +199,9 @@ function analyze(data,wbStrength=0.6){
   s.stops=Math.log2(Math.max(s.p95,1e-4)/Math.max(s.p5,1e-4));
   s.clipHi=hi/N;s.clipLo=lo/N;
   s.chroma=midN?(chromaSum/midN)/Math.max(meanSum/midN,1e-6):0;
+  let ma=0,mb=0;for(let i=0;i<chr.length;i+=2){ma+=chr[i];mb+=chr[i+1]}ma/=Math.max(midN,1);mb/=Math.max(midN,1);
+  let sp=0;for(let i=0;i<chr.length;i+=2)sp+=Math.hypot(chr[i]-ma,chr[i+1]-mb);
+  s.spread=midN?sp/midN:0;
   s.mid=midN?sl.map(v=>Math.exp(v/midN)):[1,1,1];
 
   const notes=[];
@@ -207,7 +211,9 @@ function analyze(data,wbStrength=0.6){
   ev=Math.round(ev*100)/100;
   if(Math.abs(ev)<0.15)ev=0;else notes.push({k:'info',m:`${ev>0?'Subir':'Bajar'} la exposición ${Math.abs(ev).toFixed(2)} EV.`});
 
-  const mm=(s.mid[0]+s.mid[1]+s.mid[2])/3,full=s.mid.map(v=>mm/v),wb=full.map(v=>v**wbStrength).map((v,_,a)=>v/a[1]);
+  const colorful=s.spread>0.5,k=wbStrength*clamp((0.9-s.spread)/0.4,0,1);
+  if(colorful)notes.push({k:'warn',m:`Escena con mucho color (dispersión ${s.spread.toFixed(2)}): se atenúa el balance de blancos automático y no se sube la saturación. Ajusta la piel a mano.`});
+  const mm=(s.mid[0]+s.mid[1]+s.mid[2])/3,full=s.mid.map(v=>mm/v),wb=full.map(v=>v**k).map((v,_,a)=>v/a[1]);
   let t=0,tn=0;
   if(Math.max(Math.abs(wb[0]-1),Math.abs(wb[1]-1),Math.abs(wb[2]-1))>0.04){
     const lr=Math.log2(wb[0]),lb=Math.log2(wb[2]);
@@ -218,7 +224,7 @@ function analyze(data,wbStrength=0.6){
   let c=s.stops>=6.5?0:clamp((6.5-s.stops)*0.12,0,0.45);c=Math.round(c*100)/100;
   if(c)notes.push({k:'info',m:`Imagen plana (${s.stops.toFixed(1)} stops entre p5 y p95): contraste +${c}.`});
   let sat=1;
-  if(s.chroma<0.27){sat=Math.round(clamp(0.30/Math.max(s.chroma,1e-3),0.9,1.25)*100)/100;
+  if(s.chroma<0.27&&!colorful){sat=Math.round(clamp(0.30/Math.max(s.chroma,1e-3),0.9,1.25)*100)/100;
     if(sat>1.02)notes.push({k:'info',m:`Colores apagados: saturación ×${sat}.`});else sat=1}
   if(s.clipHi>0.01)notes.push({k:'warn',m:`${(s.clipHi*100).toFixed(1)} % de píxeles cerca del tope del log: posibles altas luces recortadas en origen.`});
   if(s.clipLo>0.05)notes.push({k:'warn',m:`${(s.clipLo*100).toFixed(1)} % de píxeles en negro profundo: revisa sombras y ruido.`});

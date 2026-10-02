@@ -21,6 +21,8 @@ from generate_luts import (apple_log_to_linear, M_2020_TO_709, LUMA, make_transf
 WIDTH = 640
 TARGET_MEDIAN = 0.16        # luminancia lineal de escena objetivo para el valor medio
 MAX_EV = 1.5                # limite de correccion de exposicion
+SPREAD_COLORFUL = 0.5       # dispersion de color a partir de la cual se considera escena colorida
+SPREAD_MAX_WB = 0.9         # a partir de aqui no se corrige el balance de blancos
 
 
 def run(cmd):
@@ -60,7 +62,11 @@ def stats(frames):
     px = lin.reshape(-1, 3)[mid]
     mean_rgb = np.exp(np.log(np.clip(px, 1e-4, None)).mean(axis=0))  # media geometrica de medios
     chroma = np.abs(px - px.mean(axis=1, keepdims=True)).mean() / max(px.mean(), 1e-6)
+    lg = np.log2(np.clip(px, 1e-4, None))
+    ca, cb = lg[:, 0] - lg[:, 1], lg[:, 2] - lg[:, 1]      # cromaticidad en stops
+    spread = float(np.hypot(ca - ca.mean(), cb - cb.mean()).mean())
     return dict(
+        color_spread=spread,
         median=p(50), p1=p(1), p5=p(5), p95=p(95), p99=p(99),
         stops_range=float(np.log2(max(p(95), 1e-4) / max(p(5), 1e-4))),
         code_clip_hi=float((frames.max(axis=-1) > 0.98).mean()),
@@ -86,8 +92,13 @@ def suggest(s, wb_strength):
     # Balance de blancos: gray-world sobre medios tonos, atenuado
     m = np.array(s["mid_rgb"])
     full = m.mean() / m
-    wb = full ** wb_strength
+    # Con mucho color (luces de colores, objetos vivos) gray-world engaña: se atenua
+    spread = s["color_spread"]
+    colorful = spread > SPREAD_COLORFUL
+    wb = full ** (wb_strength * float(np.clip((SPREAD_MAX_WB - spread) / (SPREAD_MAX_WB - SPREAD_COLORFUL), 0, 1)))
     wb = wb / wb[1]
+    if colorful:
+        notes.append(f"Escena con mucho color (dispersion {spread:.2f}): se atenua el balance de blancos automatico y no se sube la saturacion. Ajusta la piel a mano.")
     if np.abs(wb - 1).max() > 0.04:
         side = "calida" if wb[0] < wb[2] else "fria"
         notes.append(f"Dominante {side} detectada; ganancias RGB {wb.round(3).tolist()}.")
@@ -102,8 +113,8 @@ def suggest(s, wb_strength):
         notes.append(f"Imagen plana ({sr:.1f} stops entre p5 y p95): contraste +{c}.")
 
     # Saturacion
-    sat = round(float(np.clip(0.30 / max(s["chroma"], 1e-3), 0.9, 1.25)), 2) if s["chroma"] < 0.27 else 1.0
-    if s["chroma"] < 0.27 and sat > 1.02:
+    sat = round(float(np.clip(0.30 / max(s["chroma"], 1e-3), 0.9, 1.25)), 2) if s["chroma"] < 0.27 and not colorful else 1.0
+    if s["chroma"] < 0.27 and not colorful and sat > 1.02:
         notes.append(f"Colores apagados: saturacion x{sat}.")
     else:
         sat = 1.0
