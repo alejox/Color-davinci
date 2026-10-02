@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+<title>Corrección Apple Log</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: banco de trabajo de color. Dos vistas (original / corregido) a la izquierda, análisis y controles a la derecha; en celular todo en una columna. */
+:root{
+  --bg:#eceff0; --panel:#f9fafa; --ink:#1a2125; --muted:#596469; --line:#d3d9dc;
+  --accent:#0b7f74; --accent-ink:#ffffff; --warn:#a96510; --crit:#b3362b; --ok:#2f7d4f;
+  --chan-r:#d24b4b; --chan-g:#3a9a5b; --chan-b:#3f6fd1; --view:#0d1012;
+  --font-ui:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111416; --panel:#1a1f22; --ink:#e6eaec; --muted:#8f9ca3; --line:#2c353a;
+  --accent:#3cc4b3; --accent-ink:#06211e; --warn:#e0a24a; --crit:#ec7a6e; --ok:#6cc58d;
+  --chan-r:#ef7777; --chan-g:#69cf8b; --chan-b:#78a0f2; --view:#06080a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111416; --panel:#1a1f22; --ink:#e6eaec; --muted:#8f9ca3; --line:#2c353a;
+  --accent:#3cc4b3; --accent-ink:#06211e; --warn:#e0a24a; --crit:#ec7a6e; --ok:#6cc58d;
+  --chan-r:#ef7777; --chan-g:#69cf8b; --chan-b:#78a0f2; --view:#06080a; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--font-ui);padding-inline:16px;padding-block:20px 32px}
+.app{max-width:1280px;margin-inline:auto;display:flex;flex-direction:column;gap:16px}
+h1{font-size:20px;font-weight:600;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+p{margin:0}
+.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between}
+.sub{color:var(--muted);margin-top:2px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:500 13px var(--font-ui);padding:8px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer;display:inline-block}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+.btn:hover{filter:brightness(1.07)}
+.btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.views{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.views{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+figure{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+figcaption{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+figcaption b{color:var(--ink);font-weight:600}
+canvas.view{width:100%;height:auto;background:var(--view);border-radius:6px;display:block}
+canvas.hist{width:100%;height:64px;display:block;border-radius:4px;background:var(--view)}
+.banner{font-size:12.5px;padding:9px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--muted)}
+.banner.warn{border-color:var(--warn);color:var(--ink)}
+.src{font-size:12px;color:var(--muted)}
+dl.metrics{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin:0 0 12px}
+dl.metrics dt{color:var(--muted)}
+dl.metrics dd{margin:0;font:500 13px var(--font-mono);font-variant-numeric:tabular-nums;text-align:right}
+ul.notes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+ul.notes li{display:grid;grid-template-columns:8px 1fr;gap:9px;align-items:start;font-size:13px}
+ul.notes li::before{content:"";width:8px;height:8px;border-radius:50%;margin-top:5px;background:var(--accent)}
+ul.notes li.warn::before{background:var(--warn)} ul.notes li.ok::before{background:var(--ok)}
+.presets{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:14px}
+.presets button{font:500 13px var(--font-ui);padding:8px 6px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.presets button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.presets button:disabled{opacity:.45;cursor:not-allowed}
+.ctl{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:10px}
+.ctl label{font-size:13px}
+.ctl output{font:500 12.5px var(--font-mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.ctl input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent);margin:2px 0}
+select{font:500 13px var(--font-ui);padding:7px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+textarea{width:100%;height:110px;font:12px var(--font-mono);background:var(--view);color:var(--ink);border:1px solid var(--line);border-radius:6px;margin-top:8px}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}
+#toast{min-height:18px;font-size:12.5px;color:var(--ok);margin-top:8px}
+.scrub{display:flex;align-items:center;gap:10px;font:12px var(--font-mono);color:var(--muted)}
+.scrub input{flex:1;accent-color:var(--accent)}
+.dropping .views{outline:2px dashed var(--accent);outline-offset:6px}
+@media (prefers-reduced-motion:no-preference){.btn{transition:filter .15s}}
+</style>
+
+<div class="app" id="app">
+  <header class="top">
+    <div>
+      <h1>Corrección Apple Log</h1>
+      <p class="sub">iPhone 16 · de Apple Log (Rec.2020) a Rec.709</p>
+    </div>
+    <div class="row">
+      <label class="btn" for="file">Abrir imagen o video</label>
+      <input id="file" type="file" accept="image/*,video/*" hidden>
+      <button class="btn ghost" id="sampleBtn" type="button">Escena de ejemplo</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section aria-label="Vista previa" style="min-width:0;display:flex;flex-direction:column;gap:10px">
+      <p class="src" id="srcLabel"></p>
+      <div class="banner warn" id="videoWarn" hidden>Los navegadores pueden convertir el color de un video HEVC o Rec.2020 antes de mostrarlo, y entonces las medidas no son fiables. Para analizar con precisión usa fotogramas exportados como PNG desde DaVinci Resolve.</div>
+      <div class="views">
+        <figure>
+          <figcaption><b>Original</b><span>códigos Apple Log</span></figcaption>
+          <canvas class="view" id="cvIn" width="640" height="360"></canvas>
+          <canvas class="hist" id="hIn" width="320" height="64" aria-label="Histograma del original"></canvas>
+        </figure>
+        <figure>
+          <figcaption><b>Corregido</b><span>Rec.709 · gamma 2.4</span></figcaption>
+          <canvas class="view" id="cvOut" width="640" height="360"></canvas>
+          <canvas class="hist" id="hOut" width="320" height="64" aria-label="Histograma del corregido"></canvas>
+        </figure>
+      </div>
+      <div class="scrub" id="scrub" hidden><span>Fotograma</span><input type="range" id="time" min="0" max="1" step="0.01" value="0"><output id="timeOut">0.0 s</output></div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <h2>Análisis</h2>
+        <dl class="metrics" id="metrics"></dl>
+        <ul class="notes" id="notes"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Ajuste</h2>
+        <div class="presets" id="presets">
+          <button type="button" data-p="neutral">Neutral</button>
+          <button type="button" data-p="suggested">Sugerida</button>
+          <button type="button" data-p="punchy">Punchy</button>
+          <button type="button" data-p="bright">Bright</button>
+        </div>
+        <div class="ctl"><label for="ev">Exposición</label><output id="evO"></output><input type="range" id="ev" min="-3" max="3" step="0.05"></div>
+        <div class="ctl"><label for="t">Temperatura</label><output id="tO"></output><input type="range" id="t" min="-2" max="2" step="0.05"></div>
+        <div class="ctl"><label for="tn">Tinte</label><output id="tnO"></output><input type="range" id="tn" min="-2" max="2" step="0.05"></div>
+        <div class="ctl"><label for="c">Contraste</label><output id="cO"></output><input type="range" id="c" min="-0.5" max="0.8" step="0.01"></div>
+        <div class="ctl"><label for="s">Saturación</label><output id="sO"></output><input type="range" id="s" min="0.5" max="1.6" step="0.01"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Exportar LUT</h2>
+        <div class="row">
+          <select id="size" aria-label="Tamaño de la LUT"><option value="17">17³ (ligera)</option><option value="33" selected>33³ (estándar)</option><option value="65">65³ (fina)</option></select>
+          <button class="btn" id="dl" type="button">Descargar .cube</button>
+          <button class="btn ghost" id="copy" type="button">Copiar</button>
+        </div>
+        <p class="hint">Desde el celular o el visor, el archivo se guarda como .cube.txt: quita el .txt final. Si no puedes guardarlo, usa Copiar y pega el texto en un archivo .cube. En DaVinci Resolve colócalo en la carpeta de LUTs.</p>
+        <div id="toast" role="status" aria-live="polite"></div>
+        <textarea id="fallback" readonly hidden aria-label="Contenido de la LUT"></textarea>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script>
+//#core-start
+const R0=-0.05641088,RT=0.01,CC=47.28711236,BETA=0.00964052,GAMMA=0.08550479,DELTA=0.69336945,PT=CC*(RT-R0)**2;
+const M=[[1.660491,-0.587641,-0.072850],[-0.124550,1.132900,-0.008349],[-0.018151,-0.100579,1.118730]];
+const LUMA=[0.2126,0.7152,0.0722];
+const decode=p=>p>=PT?2**((p-DELTA)/GAMMA)-BETA:(p<=0?R0:Math.sqrt(p/CC)+R0);
+const encode=r=>r>=RT?GAMMA*Math.log2(r+BETA)+DELTA:(r>=R0?CC*(r-R0)**2:0);
+const clamp=(x,a,b)=>Math.min(Math.max(x,a),b);
+const shoulder=(x,k=0.55)=>x<=k?x:k+(1-k)*(1-Math.exp(-(x-k)/(1-k)));
+const contrastFn=(y,a)=>{if(!a)return y;y=clamp(y,0,1);return y+a*(y-0.49)*y*(1-y)*2};
+
+// params: {ev, t, tn, c, s}. t: temperatura (+ = mas calido), tn: tinte (+ = mas magenta)
+function wbGains(t,tn){
+  const raw=[2**(0.35*t),2**(-0.25*tn),2**(-0.35*t)];
+  const l=LUMA[0]*raw[0]+LUMA[1]*raw[1]+LUMA[2]*raw[2];   // conserva la luminancia
+  return raw.map(v=>v/l);
+}
+// Devuelve f(r,g,b) -> [r,g,b] en 0..1 (entrada: codigos Apple Log 0..1)
+function makeTransform(p,decTable){
+  const gain=2**p.ev, wb=wbGains(p.t,p.tn), inv=1/2.4, d=decTable||decode;
+  return (r,g,b)=>{
+    const a=d(r),bb=d(g),c=d(b);
+    let lr=(M[0][0]*a+M[0][1]*bb+M[0][2]*c)*wb[0]*gain;
+    let lg=(M[1][0]*a+M[1][1]*bb+M[1][2]*c)*wb[1]*gain;
+    let lb=(M[2][0]*a+M[2][1]*bb+M[2][2]*c)*wb[2]*gain;
+    let o0=Math.max(shoulder(Math.max(lr,0)),0)**inv, o1=Math.max(shoulder(Math.max(lg,0)),0)**inv, o2=Math.max(shoulder(Math.max(lb,0)),0)**inv;
+    o0=contrastFn(o0,p.c);o1=contrastFn(o1,p.c);o2=contrastFn(o2,p.c);
+    if(p.s!==1){const y=LUMA[0]*o0+LUMA[1]*o1+LUMA[2]*o2;o0=y+(o0-y)*p.s;o1=y+(o1-y)*p.s;o2=y+(o2-y)*p.s}
+    return [clamp(o0,0,1),clamp(o1,0,1),clamp(o2,0,1)];
+  };
+}
+function cubeText(title,size,f){
+  const n=size-1,lines=[`TITLE "${title}"`,`LUT_3D_SIZE ${size}`,'DOMAIN_MIN 0 0 0','DOMAIN_MAX 1 1 1'];
+  for(let b=0;b<size;b++)for(let g=0;g<size;g++)for(let r=0;r<size;r++){
+    const o=f(r/n,g/n,b/n);lines.push(`${o[0].toFixed(6)} ${o[1].toFixed(6)} ${o[2].toFixed(6)}`)}
+  return lines.join('\n')+'\n';
+}
+const pct=(sorted,q)=>{const i=(sorted.length-1)*q/100,lo=Math.floor(i),hi=Math.ceil(i);return sorted[lo]+(sorted[hi]-sorted[lo])*(i-lo)};
+
+// Mide un fotograma (Uint8ClampedArray RGBA con codigos Apple Log) y propone parametros
+function analyze(data,wbStrength=0.6){
+  const dec=new Float64Array(256);for(let i=0;i<256;i++)dec[i]=decode(i/255);
+  const N=data.length/4,ys=new Float32Array(N);
+  let hi=0,lo=0,midN=0,sl=[0,0,0],chromaSum=0,meanSum=0;
+  for(let i=0,k=0;i<data.length;i+=4,k++){
+    const a=dec[data[i]],b=dec[data[i+1]],c=dec[data[i+2]];
+    const r=M[0][0]*a+M[0][1]*b+M[0][2]*c,g=M[1][0]*a+M[1][1]*b+M[1][2]*c,bl=M[2][0]*a+M[2][1]*b+M[2][2]*c;
+    const y=LUMA[0]*r+LUMA[1]*g+LUMA[2]*bl;ys[k]=y;
+    const mx=Math.max(data[i],data[i+1],data[i+2]);if(mx/255>0.98)hi++;if(mx/255<0.02)lo++;
+    if(y>0.03&&y<0.5){midN++;sl[0]+=Math.log(Math.max(r,1e-4));sl[1]+=Math.log(Math.max(g,1e-4));sl[2]+=Math.log(Math.max(bl,1e-4));
+      const m=(r+g+bl)/3;chromaSum+=(Math.abs(r-m)+Math.abs(g-m)+Math.abs(bl-m))/3;meanSum+=m}
+  }
+  const sorted=Float32Array.from(ys).sort();
+  const s={median:pct(sorted,50),p5:pct(sorted,5),p95:pct(sorted,95),p99:pct(sorted,99)};
+  s.stops=Math.log2(Math.max(s.p95,1e-4)/Math.max(s.p5,1e-4));
+  s.clipHi=hi/N;s.clipLo=lo/N;
+  s.chroma=midN?(chromaSum/midN)/Math.max(meanSum/midN,1e-6):0;
+  s.mid=midN?sl.map(v=>Math.exp(v/midN)):[1,1,1];
+
+  const notes=[];
+  let ev=clamp(Math.log2(0.16/Math.max(s.median,1e-4)),-1.5,1.5);
+  const cap=Math.log2(1.5/Math.max(s.p99,1e-4));
+  if(ev>cap){ev=Math.max(cap,-1.5);notes.push({k:'warn',m:'Exposición limitada para proteger las altas luces.'})}
+  ev=Math.round(ev*100)/100;
+  if(Math.abs(ev)<0.15)ev=0;else notes.push({k:'info',m:`${ev>0?'Subir':'Bajar'} la exposición ${Math.abs(ev).toFixed(2)} EV.`});
+
+  const mm=(s.mid[0]+s.mid[1]+s.mid[2])/3,full=s.mid.map(v=>mm/v),wb=full.map(v=>v**wbStrength).map((v,_,a)=>v/a[1]);
+  let t=0,tn=0;
+  if(Math.max(Math.abs(wb[0]-1),Math.abs(wb[1]-1),Math.abs(wb[2]-1))>0.04){
+    const lr=Math.log2(wb[0]),lb=Math.log2(wb[2]);
+    t=clamp((lr-lb)/0.7,-2,2);tn=clamp((lr-0.35*t)/0.25,-2,2);
+    t=Math.round(t*20)/20;tn=Math.round(tn*20)/20;
+    notes.push({k:'info',m:`Dominante ${wb[0]<wb[2]?'cálida':'fría'} detectada: se compensa en Temperatura y Tinte.`});
+  }
+  let c=s.stops>=6.5?0:clamp((6.5-s.stops)*0.12,0,0.45);c=Math.round(c*100)/100;
+  if(c)notes.push({k:'info',m:`Imagen plana (${s.stops.toFixed(1)} stops entre p5 y p95): contraste +${c}.`});
+  let sat=1;
+  if(s.chroma<0.27){sat=Math.round(clamp(0.30/Math.max(s.chroma,1e-3),0.9,1.25)*100)/100;
+    if(sat>1.02)notes.push({k:'info',m:`Colores apagados: saturación ×${sat}.`});else sat=1}
+  if(s.clipHi>0.01)notes.push({k:'warn',m:`${(s.clipHi*100).toFixed(1)} % de píxeles cerca del tope del log: posibles altas luces recortadas en origen.`});
+  if(s.clipLo>0.05)notes.push({k:'warn',m:`${(s.clipLo*100).toFixed(1)} % de píxeles en negro profundo: revisa sombras y ruido.`});
+  if(!notes.length)notes.push({k:'ok',m:'Exposición y color correctos; la LUT Neutral basta.'});
+  return {stats:s,params:{ev,t,tn,c,s:sat},notes};
+}
+//#core-end
+
+const $=id=>document.getElementById(id);
+const PRESETS={neutral:{ev:0,t:0,tn:0,c:0,s:1},punchy:{ev:0,t:0,tn:0,c:0.35,s:1.12},bright:{ev:0.5,t:0,tn:0,c:0.15,s:1.05}};
+const dec8=new Float64Array(256);for(let i=0;i<256;i++)dec8[i]=decode(i/255);
+const decT=v=>dec8[Math.round(v*255)];   // tabla para pixeles de 8 bits
+let src=null,result=null,params={...PRESETS.neutral},preset='neutral',srcName='',video=null,raf=0;
+const cvIn=$('cvIn'),cvOut=$('cvOut');
+
+function setSource(imgData,label){
+  src=imgData;srcName=label;
+  for(const cv of [cvIn,cvOut]){cv.width=imgData.width;cv.height=imgData.height}
+  cvIn.getContext('2d').putImageData(imgData,0,0);
+  result=analyze(imgData.data);
+  $('srcLabel').textContent=label;
+  renderAnalysis();
+  applyPreset('suggested');
+}
+function renderAnalysis(){
+  const s=result.stats;
+  $('metrics').innerHTML=[['Mediana (lineal)',s.median.toFixed(3)],['Rango p5–p95',s.stops.toFixed(1)+' stops'],['Croma en medios',s.chroma.toFixed(2)],['Altas luces recortadas',(s.clipHi*100).toFixed(1)+' %'],['Negro profundo',(s.clipLo*100).toFixed(1)+' %']]
+    .map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+  $('notes').innerHTML=result.notes.map(n=>`<li class="${n.k}">${n.m}</li>`).join('');
+  $('presets').querySelector('[data-p="suggested"]').disabled=false;
+}
+function applyPreset(name){
+  preset=name;params={...(name==='suggested'?result.params:PRESETS[name])};syncUI();schedule();
+}
+function syncUI(){
+  const f={ev:v=>(v>=0?'+':'')+v.toFixed(2)+' EV',t:v=>(v>=0?'+':'')+v.toFixed(2),tn:v=>(v>=0?'+':'')+v.toFixed(2),c:v=>(v>=0?'+':'')+v.toFixed(2),s:v=>'×'+v.toFixed(2)};
+  for(const k of ['ev','t','tn','c','s']){$(k).value=params[k];$(k+'O').textContent=f[k](params[k])}
+  for(const b of $('presets').children)b.setAttribute('aria-pressed',String(b.dataset.p===preset));
+}
+function schedule(){if(!raf)raf=requestAnimationFrame(()=>{raf=0;render()})}
+function render(){
+  if(!src)return;
+  const f=makeTransform(params,decT),out=cvOut.getContext('2d').createImageData(src.width,src.height),d=src.data,o=out.data;
+  for(let i=0;i<d.length;i+=4){const r=f(d[i]/255,d[i+1]/255,d[i+2]/255);o[i]=r[0]*255+.5;o[i+1]=r[1]*255+.5;o[i+2]=r[2]*255+.5;o[i+3]=255}
+  cvOut.getContext('2d').putImageData(out,0,0);
+  drawHist($('hIn'),d);drawHist($('hOut'),o);
+}
+function drawHist(cv,data){
+  const ctx=cv.getContext('2d'),w=cv.width,h=cv.height,B=96,bins=[new Float32Array(B),new Float32Array(B),new Float32Array(B)];
+  for(let i=0;i<data.length;i+=4)for(let c=0;c<3;c++)bins[c][Math.min(B-1,data[i+c]*B>>8)]++;
+  const peak=Math.max(...bins.map(b=>{const s=[...b].sort((x,y)=>x-y);return s[s.length-3]}),1),cs=getComputedStyle(document.documentElement);
+  ctx.clearRect(0,0,w,h);ctx.fillStyle=getComputedStyle(cv).backgroundColor;ctx.fillRect(0,0,w,h);
+  ctx.globalAlpha=.25;ctx.strokeStyle='#fff';ctx.lineWidth=1;for(const q of [.25,.5,.75]){ctx.beginPath();ctx.moveTo(w*q,0);ctx.lineTo(w*q,h);ctx.stroke()}
+  ctx.globalAlpha=1;
+  ['--chan-r','--chan-g','--chan-b'].forEach((v,c)=>{
+    ctx.strokeStyle=cs.getPropertyValue(v).trim();ctx.lineWidth=1.5;ctx.beginPath();
+    for(let i=0;i<B;i++){const x=(i+.5)/B*w,y=h-2-Math.min(bins[c][i]/peak,1)*(h-6);i?ctx.lineTo(x,y):ctx.moveTo(x,y)}
+    ctx.stroke()});
+}
+
+// --- carga de archivos ---
+function fromCanvasSource(el,w0,h0,label){
+  const W=Math.min(640,w0),H=Math.round(h0*W/w0),cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const ctx=cv.getContext('2d',{willReadFrequently:true});ctx.drawImage(el,0,0,W,H);
+  setSource(ctx.getImageData(0,0,W,H),label);
+}
+function loadFile(file){
+  if(!file)return;
+  const url=URL.createObjectURL(file);
+  $('videoWarn').hidden=true;$('scrub').hidden=true;video=null;
+  if(file.type.startsWith('video')){
+    const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=url;
+    v.onloadeddata=()=>{video=v;$('videoWarn').hidden=false;$('scrub').hidden=false;$('time').max=v.duration||1;$('time').value=Math.min(1,v.duration/2);v.currentTime=+$('time').value};
+    v.onseeked=()=>{$('timeOut').textContent=v.currentTime.toFixed(1)+' s';fromCanvasSource(v,v.videoWidth,v.videoHeight,`Video: ${file.name}`)};
+    v.onerror=()=>toast('Este navegador no puede leer ese video. Prueba con una imagen PNG.',true);
+  }else{
+    const img=new Image();img.onload=()=>{fromCanvasSource(img,img.naturalWidth,img.naturalHeight,`Imagen: ${file.name}`);URL.revokeObjectURL(url)};
+    img.onerror=()=>toast('No se pudo leer ese archivo como imagen.',true);img.src=url;
+  }
+}
+function loadSample(){
+  $('videoWarn').hidden=true;$('scrub').hidden=true;video=null;
+  const w=640,h=360,img=new ImageData(w,h),rnd=(()=>{let s=1;return()=>((s=s*16807%2147483647)-1)/2147483646})();
+  const wbs=[1.3*.55,.55,.8*.55];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const u=x/w,v=y/h;let c=v<.55?[.10+.05*v,.14+.05*v,.22+.03*v]:[.05,.06,.03];
+    const disc=(cx,cy,r,col)=>{if((u-cx)**2+(v-cy)**2<r*r)c=col};
+    disc(.2,.75,.09,[.12,.02,.02]);disc(.4,.78,.08,[.02,.10,.03]);disc(.6,.76,.09,[.02,.04,.14]);disc(.8,.72,.07,[.30,.22,.05]);disc(.75,.2,.05,[.9,.8,.6]);
+    const i=(y*w+x)*4;for(let k=0;k<3;k++)img.data[i+k]=Math.round(clamp(encode(Math.max(c[k]*wbs[k]+(rnd()-.5)*.004,0)),0,1)*255);img.data[i+3]=255}
+  setSource(img,'Escena de ejemplo sintética, subexpuesta y con dominante cálida. Abre un fotograma tuyo para analizarlo.');
+}
+
+// --- exportar ---
+function currentCube(){const size=+$('size').value;return cubeText(`Apple Log ${srcName?'ajuste':'ajuste'}`,size,makeTransform(params))}
+function toast(m,bad){const t=$('toast');t.textContent=m;t.style.color=bad?'var(--crit)':'var(--ok)'}
+$('dl').onclick=async()=>{
+  if(!src)return;const text=currentCube();
+  let dls=null;try{dls=await window.claude?.use?.('downloads')}catch(e){}
+  if(dls){
+    // El visor solo admite ciertas extensiones: se guarda como .cube.txt y se renombra a .cube
+    try{await dls.save({filename:'iPhone16_AppleLog_ajuste.cube.txt',data:text});toast('Guardado. Quita el ".txt" final para dejarlo como .cube.')}
+    catch(e){toast(e&&e.code==='declined'?'Guardado cancelado.':'No se pudo guardar. Usa Copiar.',true)}
+    return;
+  }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download='iPhone16_AppleLog_ajuste.cube';
+  document.body.appendChild(a);a.click();a.remove();toast('Descarga iniciada.');
+};
+$('copy').onclick=async()=>{
+  if(!src)return;const text=currentCube();
+  try{await navigator.clipboard.writeText(text);toast('LUT copiada. Pégala en un archivo .cube.');$('fallback').hidden=true}
+  catch(e){const ta=$('fallback');ta.hidden=false;ta.value=text;ta.focus();ta.select();toast('Selecciona el texto de abajo y cópialo.',true)}
+};
+
+// --- eventos ---
+$('presets').addEventListener('click',e=>{const b=e.target.closest('button');if(b&&!b.disabled)applyPreset(b.dataset.p)});
+for(const k of ['ev','t','tn','c','s'])$(k).addEventListener('input',()=>{params[k]=+$(k).value;preset='';syncUI();schedule()});
+$('file').onchange=e=>loadFile(e.target.files[0]);
+$('sampleBtn').onclick=loadSample;
+$('time').oninput=()=>{if(video)video.currentTime=+$('time').value};
+const app=$('app');
+['dragenter','dragover'].forEach(n=>app.addEventListener(n,e=>{e.preventDefault();app.classList.add('dropping')}));
+['dragleave','drop'].forEach(n=>app.addEventListener(n,e=>{e.preventDefault();app.classList.remove('dropping')}));
+app.addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',schedule);
+$('presets').querySelector('[data-p="suggested"]').disabled=true;
+loadSample();
+</script>
+</body></html>

@@ -13,6 +13,9 @@ LUTs `.cube` para llevar material del iPhone 16 grabado en **Apple Log** a Rec.7
 2. Línea de tiempo en Rec.709 gamma 2.4 (sin Color Management). Aplica la LUT en un nodo, o en *Clip LUT*.
 3. Si usas Resolve Color Management, no uses estas LUTs: elige Apple Log como espacio de entrada.
 
+## Interfaz gráfica
+Abre `app/index.html` en cualquier navegador (también en el celular). Carga un fotograma (PNG recomendado) o un video, o usa la escena de ejemplo. Muestra original y corregido con histogramas, el análisis, presets, sliders de exposición, temperatura, tinte, contraste y saturación, y exporta el `.cube` con tus ajustes. Todo corre en el navegador; las LUTs que genera coinciden con las de `tools/generate_luts.py`.
+
 ## Analizador de clips (sugerencia de corrección)
 ```
 pip install -r requirements.txt          # y tener ffmpeg instalado
