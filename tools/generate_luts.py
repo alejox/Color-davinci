@@ -1,91 +1,92 @@
 #!/usr/bin/env python3
 """Genera LUTs .cube para material del iPhone 16 grabado en Apple Log.
 
-Sin dependencias externas. Uso: python3 tools/generate_luts.py [--size 33]
+Uso: python3 tools/generate_luts.py [--size 33]
+Requiere numpy.
 
 Apple Log (Apple Log Profile White Paper):
   gamut: Rec.2020 primaries, D65
   curva: segmento cuadratico en negros + logaritmica en el resto
 """
-import argparse, math, os
+import argparse, os
+import numpy as np
 
 # --- Apple Log -> lineal de escena ---------------------------------------
 R0, RT, C = -0.05641088, 0.01, 47.28711236
 BETA, GAMMA, DELTA = 0.00964052, 0.08550479, 0.69336945
 PT = C * (RT - R0) ** 2
 
+M_2020_TO_709 = np.array([
+    [1.660491, -0.587641, -0.072850],
+    [-0.124550, 1.132900, -0.008349],
+    [-0.018151, -0.100579, 1.118730],
+])
+LUMA = np.array([0.2126, 0.7152, 0.0722])
+
 
 def apple_log_to_linear(p):
-    if p >= PT:
-        return 2 ** ((p - DELTA) / GAMMA) - BETA
-    if p <= 0:
-        return R0
-    return math.sqrt(p / C) + R0
+    p = np.asarray(p, dtype=np.float64)
+    hi = 2 ** ((p - DELTA) / GAMMA) - BETA
+    lo = np.sqrt(np.clip(p, 0, None) / C) + R0
+    return np.where(p >= PT, hi, np.where(p <= 0, R0, lo))
 
 
-# --- Gamut Rec.2020 -> Rec.709 (lineal) ----------------------------------
-M_2020_TO_709 = (
-    (1.660491, -0.587641, -0.072850),
-    (-0.124550, 1.132900, -0.008349),
-    (-0.018151, -0.100579, 1.118730),
-)
+def linear_to_apple_log(r):
+    r = np.asarray(r, dtype=np.float64)
+    hi = GAMMA * np.log2(np.clip(r + BETA, 1e-12, None)) + DELTA
+    lo = C * (r - R0) ** 2
+    return np.where(r >= RT, hi, np.where(r >= R0, lo, 0.0))
 
 
-def mat(m, v):
-    return tuple(sum(m[i][j] * v[j] for j in range(3)) for i in range(3))
-
-
-# --- Tone mapping + OETF de salida ---------------------------------------
 def shoulder(x, knee=0.55):
     """Lineal hasta 'knee', luego compresion suave hacia 1.0 (recupera altas luces)."""
-    if x <= knee:
-        return x
     k = 1 - knee
-    return knee + k * (1 - math.exp(-(x - knee) / k))
+    return np.where(x <= knee, x, knee + k * (1 - np.exp(-(x - knee) / k)))
 
 
-def contrast(y, amount):
+def contrast(y, amount, pivot=0.49):
     """Curva S suave alrededor del gris medio de display (pivote 0.49 ~ 18% con gamma 2.4)."""
     if amount == 0:
         return y
-    pivot = 0.49
-    y = min(max(y, 0.0), 1.0)
-    return y + amount * (y - pivot) * y * (1 - y) * 4 * 0.5
-
-
-def gamma_encode(x, g=2.4):
-    return max(x, 0.0) ** (1 / g)
+    y = np.clip(y, 0.0, 1.0)
+    return y + amount * (y - pivot) * y * (1 - y) * 2
 
 
 def rec709_oetf(x):
-    return 4.5 * x if x < 0.018 else 1.099 * x ** 0.45 - 0.099
+    x = np.clip(x, 0, None)
+    return np.where(x < 0.018, 4.5 * x, 1.099 * x ** 0.45 - 0.099)
 
 
-def make_transform(exposure=0.0, contrast_amt=0.0, sat=1.0, oetf="gamma24"):
+def make_transform(exposure=0.0, contrast_amt=0.0, sat=1.0, oetf="gamma24", wb=(1.0, 1.0, 1.0)):
+    """Devuelve f(rgb[...,3]) -> rgb[...,3] (Apple Log codigo -> Rec.709 display).
+
+    wb: ganancias RGB en lineal (Rec.709) aplicadas antes de la exposicion.
+    """
     gain = 2 ** exposure
-    enc = gamma_encode if oetf == "gamma24" else rec709_oetf
+    wb = np.asarray(wb, dtype=np.float64)
 
     def f(rgb):
-        lin = mat(M_2020_TO_709, tuple(apple_log_to_linear(c) for c in rgb))
-        lin = tuple(shoulder(max(c * gain, 0.0)) for c in lin)
-        out = tuple(contrast(enc(c), contrast_amt) for c in lin)
+        rgb = np.asarray(rgb, dtype=np.float64)
+        lin = apple_log_to_linear(rgb) @ M_2020_TO_709.T
+        lin = shoulder(np.clip(lin * wb * gain, 0.0, None))
+        out = np.clip(lin, 0, None) ** (1 / 2.4) if oetf == "gamma24" else rec709_oetf(lin)
+        out = contrast(out, contrast_amt)
         if sat != 1.0:
-            l = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
-            out = tuple(l + (c - l) * sat for c in out)
-        return tuple(min(max(c, 0.0), 1.0) for c in out)
+            l = (out @ LUMA)[..., None]
+            out = l + (out - l) * sat
+        return np.clip(out, 0.0, 1.0)
 
     return f
 
 
 def write_cube(path, title, size, fn):
+    n = size - 1
+    # .cube: R varia mas rapido, luego G, luego B
+    b, g, r = np.meshgrid(*(np.arange(size) / n,) * 3, indexing="ij")
+    out = fn(np.stack([r, g, b], axis=-1).reshape(-1, 3))
     with open(path, "w") as fh:
         fh.write(f'TITLE "{title}"\nLUT_3D_SIZE {size}\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n')
-        n = size - 1
-        for b in range(size):          # .cube: R varia mas rapido, luego G, luego B
-            for g in range(size):
-                for r in range(size):
-                    o = fn((r / n, g / n, b / n))
-                    fh.write(f"{o[0]:.6f} {o[1]:.6f} {o[2]:.6f}\n")
+        np.savetxt(fh, out, fmt="%.6f")
 
 
 LUTS = {
